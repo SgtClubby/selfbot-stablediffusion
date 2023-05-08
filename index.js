@@ -42,12 +42,17 @@ client.on('messageCreate', async (message) => {
     args.shift();
 
     if (args[0] === "model") {
+        const models = await getModels()
         args.shift()
+
+        if (args[0] == "list") {
+            return message.channel.send(`Available models:\n**${models.join(", ")}**`)
+        }
+
         if(args[0] === "set") {
             args.shift()
-            const models = await getModels()
             const chosenModel = args[0]
-            if(!models.includes(chosenModel)) return message.reply({ content: "Invalid model\nValid models are " + models.join(", "), allowedMentions: { repliedUser: true }})
+            if(!models.includes(chosenModel.toLowerCase())) return message.reply({ content: "Invalid model\nValid models are:\n" + models.join(", "), allowedMentions: { repliedUser: true }})
             model = chosenModel
             return message.channel.send(`Model set to: **${chosenModel}**`)
         } else {
@@ -90,7 +95,6 @@ async function getStatus() {
 
 let busy = false
 async function generateImage(prompt, seed, message){
-
 
     const data = await getStatus();
     if (data.status == "Rendering" || busy) {
@@ -157,14 +161,15 @@ async function generateImage(prompt, seed, message){
         let base64String = result.data.output[0].data; // Not a real image
         // Remove header
         let base64Image = base64String.split(';base64,').pop();
+        
+        const filename = "sd-" + new Date().getTime()
     
-    
-        fs.writeFile(`/home/ftpuser/sd/${result.data.task_data.request_id}.jpeg`, base64Image, {encoding: 'base64'}, function(err) {
+        fs.writeFile(`/home/ftpuser/sd/${filename}.jpeg`, base64Image, {encoding: 'base64'}, function(err) {
             if (err) {
                 console.log(err);
             }
             setTimeout(() => result.reply.delete(), 1500);
-            return message.reply({ content: `Here is your image:\nhttps://cdn.metrix.pw/sd/${result.data.task_data.request_id}.jpeg`, allowedMentions: { repliedUser: true }})
+            return message.reply({ content: `Here is your image:\nhttps://cdn.metrix.pw/sd/${filename}.jpeg`, allowedMentions: { repliedUser: true }})
         });
     }).catch((err) => { 
         return message.channel.send("Failed with error: " + err.detail)
@@ -212,7 +217,7 @@ async function probeResponse(data, message, initReply) {
             if (res.data.step != oldStep && res.data.step != undefined) {
                 const filled_len = (res.data.step * res.data.total_steps / num_inference_steps).toFixed(0)
                 const bar = '║' + '█'.repeat(filled_len) + '░'.repeat((bar_len - filled_len).toFixed(0)) + '║'
-                initReply.edit(`Step: ${res.data.step} of ${res.data.total_steps} (${(res.data.step * 100 / res.data.total_steps).toFixed(0)}%) Approx. ${time.minutes}m ${time.seconds}s remaining\n${bar}`)
+                initReply.edit(`${debug ? "DEBUG: " : ""}Step: ${res.data.step} of ${res.data.total_steps} (${(res.data.step * 100 / res.data.total_steps).toFixed(0)}%) Approx. ${time.minutes}m ${time.seconds}s remaining\n${bar}`)
                 oldStep = res.data.step
             }
 
@@ -229,17 +234,19 @@ async function handleQueue() {
 }
 
 
-let oldTime;
+let oldTime = { minutes: "??", seconds: "??" }
+
 function timeRemaining (step, step_time, total_steps) {
     const time = (total_steps - step) * step_time
     const minutes = Math.floor(time / 60)
     const seconds = Math.floor(time % 60)
     
-    // if the variable time is negative, return nan
+    // If the api returned step_time as a negative number, it means the image isnt rendering yet, so we return ?? for the time
     if (time < 0) {
-        return { minutes: "??", seconds: "??" }
+        return oldTime
     }
 
+    // sometimes the api returns an invalid json object, we return the old time
     if (isNaN(minutes) || isNaN(seconds)) {
         return oldTime
     }
